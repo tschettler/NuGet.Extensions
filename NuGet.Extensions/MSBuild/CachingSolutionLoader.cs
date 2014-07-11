@@ -13,12 +13,15 @@ namespace NuGet.Extensions.MSBuild
         private readonly CachingProjectLoader _projectLoader;
         private readonly Lazy<ICollection<IVsProject>> _projectsInSolution;
 
+        public Solution Solution { get; private set; }
         public CachingSolutionLoader(FileInfo solutionFile, IDictionary<string, string> globalMsBuildProperties, IConsole console)
         {
             _solutionFile = solutionFile;
             _console = console;
             _projectLoader = new CachingProjectLoader(globalMsBuildProperties, console);
             _projectsInSolution = new Lazy<ICollection<IVsProject>>(LoadProjectsInSolutionByGuid);
+
+            Solution = new Solution(_solutionFile.FullName);
         }
 
         public List<IVsProject> GetProjects()
@@ -33,8 +36,7 @@ namespace NuGet.Extensions.MSBuild
 
         private ICollection<IVsProject> LoadProjectsInSolutionByGuid()
         {
-            var solution = new Solution(_solutionFile.FullName);
-            return solution.Projects.Where(ProjectExists).Select(CreateProjectAdapter).ToList();
+            return Solution.Projects.Where(ProjectExists).Select(CreateProjectAdapter).ToList();
         }
 
         private IVsProject CreateProjectAdapter(SolutionProject p)

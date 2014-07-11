@@ -48,19 +48,28 @@ namespace NuGet.Extensions.Repositories
             int current = 1;
             int max = _packageSource.Count();
 
-            foreach (var filenamePackage in GetFilenamePackagePairs())
+            var filenamePackagePairs = this.GetFilenamePackagePairs().ToList();
+
+            foreach (var assembly in _assemblies)
             {
-                if (currentPackage != filenamePackage.Value) ConsoleOverwrite("Checking package {0} of {1}", current++, max);
+                _console.WriteLine("Checking packages for {0}", assembly);
+                var packages = filenamePackagePairs.Where(f => f.Key == assembly).Select(p => p.Value);
 
-                var currentFilename = filenamePackage.Key;
-                currentPackage = filenamePackage.Value;
-
-                if (_assemblies.Contains(currentFilename))
+                if (packages.IsEmpty())
                 {
-                    _resolvedAssemblies[currentFilename].Add(currentPackage);
-                    if (!exhaustive && _resolvedAssemblies.Values.All(resolvedList => resolvedList.Any())) break;
+                    continue;
+                }
+
+                if (exhaustive)
+                {
+                    _resolvedAssemblies[assembly].AddRange(packages);
+                }
+                else
+                {
+                    _resolvedAssemblies[assembly].Add(packages.OrderByDescending(p => p.Version).FirstOrDefault());
                 }
             }
+
             return new AssemblyToPackageMapping(_console, _fileSystem, _resolvedAssemblies);
         }
 

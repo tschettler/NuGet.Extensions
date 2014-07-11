@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using NuGet.Commands;
 using NuGet.Common;
 using NuGet.Extensions.MSBuild;
@@ -91,6 +92,11 @@ namespace NuGet.Extensions.Commands
             Console.WriteLine("Loading projects from solution {0}", solutionFile.Name);
 
             var existingSolutionPackagesRepo = new SharedPackageRepository(Path.Combine(solutionFile.Directory.FullName, "packages"));
+            var repository = AggregateRepositoryHelper.CreateAggregateRepositoryFromSources(RepositoryFactory, SourceProvider, Source);
+            repository.Logger = Console;
+
+            RemoveNugetProjectsFromSln(solutionFile.FullName, repository);
+
             using (var solutionAdapter = new CachingSolutionLoader(solutionFile, GetMsBuildProperties(solutionFile), Console))
             {
                 var projectAdapters = solutionAdapter.GetProjects();
@@ -98,10 +104,13 @@ namespace NuGet.Extensions.Commands
                 Console.WriteLine("Processing {0} projects...", projectAdapters.Count);
                 foreach (var projectAdapter in projectAdapters)
                 {
+                    // skip projects that already have a NuGet version, we will remove these later
+                    if (repository.FindPackagesById(projectAdapter.ProjectName).Any()) continue;
+
                     Console.WriteLine();
                     Console.WriteLine("Processing project: {0}", projectAdapter.ProjectName);
 
-                    NugetifyProject(projectAdapter, solutionFile.Directory, existingSolutionPackagesRepo);
+                    NugetifyProject(projectAdapter, solutionFile.Directory, existingSolutionPackagesRepo, repository);
 
                     Console.WriteLine("Project completed!");
                 }
@@ -109,9 +118,34 @@ namespace NuGet.Extensions.Commands
             Console.WriteLine("Complete!");
         }
 
-        private void NugetifyProject(IVsProject projectAdapter, DirectoryInfo solutionRoot, ISharedPackageRepository existingSolutionPackagesRepo)
+        private void RemoveNugetProjectsFromSln(string slnPath, AggregateRepository repository)
         {
-            var projectNugetifier = CreateProjectNugetifier(projectAdapter);
+            var slnSrc = File.ReadAllText(slnPath);
+            var solution = new Solution(slnPath);
+
+            Console.WriteLine("Checking for projects in solution that are NuGet packages...");
+            var projectsToRemove = solution.Projects.Skip(1).Where(p => repository.FindPackagesById(p.ProjectName).Any()).ToList();
+
+            if (projectsToRemove.IsEmpty())
+            {
+                return;
+            }
+
+            var regexFormat = @"^Project.*\""{0}\"".*$[\s\S]*^EndProject";
+
+            foreach (var project in projectsToRemove)
+            {
+                var regex = string.Format(regexFormat, Regex.Escape(project.ProjectName));
+                slnSrc = Regex.Replace(slnSrc, regex, string.Empty, RegexOptions.Multiline);
+            }
+
+            File.WriteAllText(slnPath, slnSrc);
+            Console.WriteLine("Removed {0} projects from the solution:{1}{2}", projectsToRemove.Count(), Environment.NewLine, string.Join(Environment.NewLine, projectsToRemove.Select(p => p.ProjectName)));
+        }
+
+        private void NugetifyProject(IVsProject projectAdapter, DirectoryInfo solutionRoot, ISharedPackageRepository existingSolutionPackagesRepo, AggregateRepository repository)
+        {
+            var projectNugetifier = CreateProjectNugetifier(projectAdapter, repository);
             var packagesAdded = projectNugetifier.NugetifyReferences(solutionRoot);
             projectNugetifier.AddNugetReferenceMetadata(existingSolutionPackagesRepo, packagesAdded);
             projectAdapter.Save();
@@ -126,11 +160,9 @@ namespace NuGet.Extensions.Commands
             }
         }
 
-        private ProjectNugetifier CreateProjectNugetifier(IVsProject projectAdapter)
+        private ProjectNugetifier CreateProjectNugetifier(IVsProject projectAdapter, AggregateRepository repository)
         {
             var projectFileSystem = new PhysicalFileSystem(projectAdapter.ProjectDirectory.ToString());
-            var repository = AggregateRepositoryHelper.CreateAggregateRepositoryFromSources(RepositoryFactory, SourceProvider, Source);
-            repository.Logger = Console;
             var hintPathGenerator = new HintPathGenerator();
             return new ProjectNugetifier(projectAdapter, repository, projectFileSystem, Console, hintPathGenerator);
         }

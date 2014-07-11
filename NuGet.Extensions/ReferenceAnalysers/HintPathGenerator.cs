@@ -14,7 +14,8 @@ namespace NuGet.Extensions.ReferenceAnalysers
         {
             var fileLocation = GetFileLocationFromPackage(package, assemblyFilename);
             //TODO make version available, currently only works for non versioned package directories...
-            var newHintPathFull = Path.Combine(solutionDir.FullName, "packages", package.Id, fileLocation);
+            var packageIdentifier = string.Format("{0}.{1}", package.Id, package.Version);
+            var newHintPathFull = Path.Combine(projectDir.FullName, "packages", packageIdentifier, fileLocation);
             var newHintPathRelative = GetRelativePath(projectDir.FullName + Path.DirectorySeparatorChar, newHintPathFull);
             return newHintPathRelative;
         }

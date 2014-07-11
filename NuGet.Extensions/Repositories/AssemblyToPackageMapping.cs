@@ -40,19 +40,21 @@ namespace NuGet.Extensions.Repositories
                 var prf = new PackageReferenceFile(_fileSystem, string.Format(".\\{0}", packagesConfig));
                 foreach (var assemblyToPackageMapping in ResolvedMappings)
                 {
-                    IPackage smallestPackage;
+                    IPackage chosenPackage;
                     if (assemblyToPackageMapping.Value.Count > 1)
                     {
-                        smallestPackage = assemblyToPackageMapping.Value.OrderBy(l => l.GetFiles().Count()).FirstOrDefault();
-                        _console.WriteLine(String.Format("{0} : Choosing {1} from {2} choices.", assemblyToPackageMapping.Key, smallestPackage.Id, assemblyToPackageMapping.Value.Count()));
+                        chosenPackage = assemblyToPackageMapping.Value.OrderByDescending(l => l.Version).FirstOrDefault();
+                        _console.WriteLine();
+                        _console.WriteLine(String.Format("{0} : Choosing {1} ({2}) from {3} choices.", assemblyToPackageMapping.Key, chosenPackage.Id, chosenPackage.Version, assemblyToPackageMapping.Value.Count()));
                     }
                     else
                     {
-                        smallestPackage = assemblyToPackageMapping.Value.First();
+                        chosenPackage = assemblyToPackageMapping.Value.First();
                     }
+
                     //Only add if we do not have another instance of the ID, not the id/version combo....
-                    if (!prf.GetPackageReferences().Any(p => p.Id == smallestPackage.Id))
-                        prf.AddEntry(smallestPackage.Id, smallestPackage.Version);
+                    if (!prf.GetPackageReferences().Any(p => p.Id == chosenPackage.Id))
+                        prf.AddEntry(chosenPackage.Id, chosenPackage.Version);
                 }
             }
             else

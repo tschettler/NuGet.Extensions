@@ -145,6 +145,11 @@ namespace NuGet.Extensions.Tests.Mocks
             Deleted.Add(path);
         }
 
+        public void DeleteFiles(IEnumerable<IPackageFile> files, string rootDir)
+        {
+            throw new NotImplementedException();
+        }
+
         public virtual bool FileExists(string path)
         {
             return Paths.ContainsKey(path);
@@ -211,6 +216,16 @@ namespace NuGet.Extensions.Tests.Mocks
         public virtual void AddFile(string path, Action<Stream> getStream)
         {
             AddFile(path, getStream.Target.ToString());
+        }
+
+        public void AddFiles(IEnumerable<IPackageFile> files, string rootDir)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void MoveFile(string source, string destination)
+        {
+            throw new NotImplementedException();
         }
 
         public virtual Stream CreateFile(string path)

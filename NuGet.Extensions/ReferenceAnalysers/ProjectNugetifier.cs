@@ -30,19 +30,27 @@ namespace NuGet.Extensions.ReferenceAnalysers
 
         public ICollection<IPackage> NugetifyReferences(DirectoryInfo solutionDir)
         {
+            var projectReferences = _vsProject.GetProjectReferences().ToList();
             var binaryReferences = _vsProject.GetBinaryReferences().ToList();
-            var resolvedMappings = ResolveReferenceMappings(binaryReferences).ToList();
+
+            return this.NugetifyProjectReferences(solutionDir, projectReferences.Union(binaryReferences).ToList());
+        }
+
+        public ICollection<IPackage> NugetifyProjectReferences(DirectoryInfo solutionDir, List<IReference> references)
+        {
+            var resolvedMappings = this.ResolveReferenceMappings(references).ToList();
             var packageReferencesAdded = new HashSet<IPackage>(new LambdaComparer<IPackage>(IPackageExtensions.Equals, IPackageExtensions.GetHashCode));
+
             foreach (var mapping in resolvedMappings)
             {
-                var referenceMatch = binaryReferences.FirstOrDefault(r => r.IsForAssembly(mapping.Key));
+                var referenceMatch = references.FirstOrDefault(r => r.IsForAssembly(mapping.Key));
                 if (referenceMatch != null)
                 {
                     var includeName = referenceMatch.AssemblyName;
                     var includeVersion = referenceMatch.AssemblyVersion;
-                    var package = mapping.Value.OrderBy(p => p.GetFiles().Count()).First();
+                    var package = mapping.Value.OrderByDescending(p => p.Version).First();
                     packageReferencesAdded.Add(package);
-                    LogHintPathRewriteMessage(package, includeName, includeVersion);
+                    LogHintPathRewriteMessage(package, includeName, package.Version.ToString());
 
                     var newHintPath = _hintPathGenerator.ForAssembly(solutionDir, _vsProject.ProjectDirectory, package, mapping.Key);
                     referenceMatch.ConvertToNugetReferenceWithHintPath(newHintPath);
@@ -123,7 +131,11 @@ namespace NuGet.Extensions.ReferenceAnalysers
             {
                 //TODO deal with GAC assemblies that we want to replace as well....
                 string hintPath;
-                if (reference.TryGetHintPath(out hintPath))
+                if (reference is ProjectReferenceAdapter)
+                {
+                    referenceFiles.Add((reference as ProjectReferenceAdapter).AssemblyName + ".dll");
+                }
+                else if (reference.TryGetHintPath(out hintPath))
                 {
                     referenceFiles.Add(Path.GetFileName(hintPath));
                 }

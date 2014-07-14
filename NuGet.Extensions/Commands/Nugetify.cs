@@ -4,6 +4,9 @@ using System.ComponentModel.Composition;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+
+using Microsoft.Build.Evaluation;
+
 using NuGet.Commands;
 using NuGet.Common;
 using NuGet.Extensions.MSBuild;
@@ -73,17 +76,41 @@ namespace NuGet.Extensions.Commands
 
         public override void ExecuteCommand()
         {
-            if (!String.IsNullOrEmpty(Arguments[0]))
+             var path = this.Arguments[0];
+           if (string.IsNullOrEmpty(path))
             {
-                var solutionFile = new FileInfo(Arguments[0]);
-                if (solutionFile.Exists && solutionFile.Extension == ".sln")
+                return;
+            }
+
+            // if it's a directory, have to find sln or csproj file
+            if (Directory.Exists(path))
+            {
+                var exts = new[] { "*.sln", "*.csproj" };
+                var file = exts.SelectMany(e => Directory.GetFiles(path, e)).FirstOrDefault();
+
+                if (file == null)
                 {
-                    NugetifySolution(solutionFile);
+                    this.Console.WriteError("Could not find a solution or project file in : {0}", path);
+                    return;
                 }
-                else
-                {
-                    Console.WriteError("Could not find solution file : {0}", solutionFile);
-                }
+
+                path = file;
+            }
+            else if (!File.Exists(path))
+            {
+                this.Console.WriteError("Could not find file : {0}", path);   
+                return;
+            }
+
+            var projectFile = new FileInfo(path);
+            switch (projectFile.Extension)
+            {
+                case ".sln":
+                    this.NugetifySolution(projectFile);
+                    break;
+                case ".csproj":
+                    this.NugetifyProject(projectFile);
+                    break;
             }
         }
 
@@ -91,31 +118,60 @@ namespace NuGet.Extensions.Commands
         {
             Console.WriteLine("Loading projects from solution {0}", solutionFile.Name);
 
-            var existingSolutionPackagesRepo = new SharedPackageRepository(Path.Combine(solutionFile.Directory.FullName, "packages"));
-            var repository = AggregateRepositoryHelper.CreateAggregateRepositoryFromSources(RepositoryFactory, SourceProvider, Source);
-            repository.Logger = Console;
+            var repository = this.GetRepository();
 
             RemoveNugetProjectsFromSln(solutionFile.FullName, repository);
 
             using (var solutionAdapter = new CachingSolutionLoader(solutionFile, GetMsBuildProperties(solutionFile), Console))
             {
-                var projectAdapters = solutionAdapter.GetProjects();
-
-                Console.WriteLine("Processing {0} projects...", projectAdapters.Count);
-                foreach (var projectAdapter in projectAdapters)
-                {
-                    // skip projects that already have a NuGet version, we will remove these later
-                    if (repository.FindPackagesById(projectAdapter.ProjectName).Any()) continue;
-
-                    Console.WriteLine();
-                    Console.WriteLine("Processing project: {0}", projectAdapter.ProjectName);
-
-                    NugetifyProject(projectAdapter, solutionFile.Directory, existingSolutionPackagesRepo, repository);
-
-                    Console.WriteLine("Project completed!");
-                }
+                this.ProcessProjects(solutionFile, solutionAdapter.GetProjects(), repository);
             }
+
             Console.WriteLine("Complete!");
+        }
+
+        private void NugetifyProject(FileInfo solutionFile)
+        {
+            var projectLoader = new CachingProjectLoader(new Dictionary<string, string>(), Console);
+            var project = new Project(solutionFile.FullName);
+
+            var projectAdapter = new ProjectAdapter(project, projectLoader);
+
+            var repository = this.GetRepository();
+
+            this.ProcessProjects(solutionFile, new List<IVsProject> { projectAdapter }, repository);
+
+            Console.WriteLine("Complete!");            
+        }
+
+        private AggregateRepository GetRepository()
+        {
+            var repository = AggregateRepositoryHelper.CreateAggregateRepositoryFromSources(RepositoryFactory, SourceProvider, Source);
+            repository.Logger = Console;
+            return repository;
+        }
+
+        private void ProcessProjects(FileInfo solutionFile, List<IVsProject> projectAdapters, AggregateRepository repository)
+        {
+            var existingSolutionPackagesRepo = new SharedPackageRepository(Path.Combine(solutionFile.Directory.FullName, "packages"));
+
+            Console.WriteLine("Processing {0} projects...", projectAdapters.Count);
+
+            foreach (var projectAdapter in projectAdapters)
+            {
+                // skip projects that already have a NuGet version, we will remove these later
+                if (repository.FindPackagesById(projectAdapter.ProjectName).Any())
+                {
+                    continue;
+                }
+
+                Console.WriteLine();
+                Console.WriteLine("Processing project: {0}", projectAdapter.ProjectName);
+
+                NugetifyProject(projectAdapter, solutionFile.Directory, existingSolutionPackagesRepo, repository);
+
+                Console.WriteLine("Project completed!");
+            }           
         }
 
         private void RemoveNugetProjectsFromSln(string slnPath, AggregateRepository repository)

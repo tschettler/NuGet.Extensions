@@ -32,34 +32,35 @@ namespace NuGet.Extensions.Repositories
         public void OutputPackageConfigFile()
         {
             var packagesConfig = Constants.PackageReferenceFile;
-            if (_fileSystem.FileExists(packagesConfig))
-                _fileSystem.DeleteFile(packagesConfig);
+            //if (_fileSystem.FileExists(packagesConfig))
+            //    _fileSystem.DeleteFile(packagesConfig);
 
-            if (!_fileSystem.FileExists(packagesConfig))
+            var prf = new PackageReferenceFile(_fileSystem, string.Format(".\\{0}", packagesConfig));
+            foreach (var assemblyToPackageMapping in ResolvedMappings)
             {
-                var prf = new PackageReferenceFile(_fileSystem, string.Format(".\\{0}", packagesConfig));
-                foreach (var assemblyToPackageMapping in ResolvedMappings)
+                IPackage chosenPackage;
+                if (assemblyToPackageMapping.Value.Count > 1)
                 {
-                    IPackage chosenPackage;
-                    if (assemblyToPackageMapping.Value.Count > 1)
-                    {
-                        chosenPackage = assemblyToPackageMapping.Value.OrderByDescending(l => l.Version).FirstOrDefault();
-                        _console.WriteLine();
-                        _console.WriteLine(String.Format("{0} : Choosing {1} ({2}) from {3} choices.", assemblyToPackageMapping.Key, chosenPackage.Id, chosenPackage.Version, assemblyToPackageMapping.Value.Count()));
-                    }
-                    else
-                    {
-                        chosenPackage = assemblyToPackageMapping.Value.First();
-                    }
-
-                    //Only add if we do not have another instance of the ID, not the id/version combo....
-                    if (!prf.GetPackageReferences().Any(p => p.Id == chosenPackage.Id))
-                        prf.AddEntry(chosenPackage.Id, chosenPackage.Version);
+                    chosenPackage = assemblyToPackageMapping.Value.OrderByDescending(l => l.Version).FirstOrDefault();
+                    _console.WriteLine();
+                    _console.WriteLine(
+                        String.Format(
+                            "{0} : Choosing {1} ({2}) from {3} choices.",
+                            assemblyToPackageMapping.Key,
+                            chosenPackage.Id,
+                            chosenPackage.Version,
+                            assemblyToPackageMapping.Value.Count()));
                 }
-            }
-            else
-            {
-                _console.WriteError("Please move the existing packages.config file....");
+                else
+                {
+                    chosenPackage = assemblyToPackageMapping.Value.First();
+                }
+
+                //Only add if we do not have another instance of the ID, not the id/version combo....
+                if (prf.GetPackageReferences().All(p => p.Id != chosenPackage.Id))
+                {
+                    prf.AddEntry(chosenPackage.Id, chosenPackage.Version);
+                }
             }
         }
 

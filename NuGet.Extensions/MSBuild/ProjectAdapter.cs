@@ -23,7 +23,13 @@ namespace NuGet.Extensions.MSBuild
         {
             const string itemType = "Reference";
             var conditionTrueReferences = new HashSet<ProjectItem>(_project.GetItems(itemType));
-            return conditionTrueReferences.Select(r => new BinaryReferenceAdapter(r, true));
+            return conditionTrueReferences.Select(
+                r =>
+                    {
+                        var adapter = new BinaryReferenceAdapter(r, true);
+                        adapter.Initialize();
+                        return adapter;
+                    });
         }
 
         public string AssemblyName

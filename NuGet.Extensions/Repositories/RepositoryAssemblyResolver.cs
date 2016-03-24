@@ -6,16 +6,18 @@ using NuGet.Common;
 
 namespace NuGet.Extensions.Repositories
 {
+    using global::NuGet.Extensions.ExtensionMethods;
+    using global::NuGet.Extensions.MSBuild;
+
     /// <summary>
     /// Provides the ability to search across IQueryable package sources for a set of packages that contain a particular assembly or set of assemblies.
     /// </summary>
     public class RepositoryAssemblyResolver
     {
-        readonly HashSet<string> _assemblies = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
         readonly IQueryable<IPackage> _packageSource;
         private readonly IFileSystem _fileSystem;
         private readonly IConsole _console;
-        private readonly Dictionary<string, List<IPackage>> _resolvedAssemblies;
+        private Dictionary<string, List<IPackage>> _resolvedAssemblies;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RepositoryAssemblyResolver"/> class.
@@ -24,33 +26,34 @@ namespace NuGet.Extensions.Repositories
         /// <param name="packageSource">The package sources to search.</param>
         /// <param name="fileSystem">The file system to output any packages.config files.</param>
         /// <param name="console">The console to output to.</param>
-        public RepositoryAssemblyResolver(List<string> assemblies, IQueryable<IPackage> packageSource, IFileSystem fileSystem, IConsole console)
+        public RepositoryAssemblyResolver(IQueryable<IPackage> packageSource, IFileSystem fileSystem, IConsole console)
         {
             _packageSource = packageSource;
             _fileSystem = fileSystem;
             _console = console;
-
-            foreach (var assembly in assemblies.Where(assembly => !_assemblies.Add(assembly)))
-            {
-                console.WriteWarning("Same assembly resolution will be used for both assembly references to {0}", assembly);
-            }
-            _resolvedAssemblies = _assemblies.ToDictionary(a => a, _ => new List<IPackage>());
         }
-        
+
         /// <summary>
         /// Resolves a list of packages that contain the assemblies requested.
         /// </summary>
         /// <param name="exhaustive">if set to <c>true</c> [exhaustive].</param>
         /// <returns></returns>
-        public AssemblyToPackageMapping GetAssemblyToPackageMapping(Boolean exhaustive)
+        public AssemblyToPackageMapping GetAssemblyToPackageMapping(List<string> assemblies, bool exhaustive)
         {
-            IPackage currentPackage = null;
-            int current = 1;
+            var assemblySet = new HashSet<string>(StringComparer.InvariantCultureIgnoreCase);
+            foreach (var assembly in assemblies.Where(assembly => !assemblySet.Add(assembly)))
+            {
+                _console.WriteWarning("Same assembly resolution will be used for both assembly references to {0}", assembly);
+            }
+
+            _resolvedAssemblies = assemblySet.ToDictionary(a => a, _ => new List<IPackage>()); 
+            
             int max = _packageSource.Count();
 
             var filenamePackagePairs = this.GetFilenamePackagePairs().ToList();
 
-            foreach (var assembly in _assemblies)
+            _console.WriteLine("Searching through {0} packages", max);
+            foreach (var assembly in assemblySet)
             {
                 _console.WriteLine("Checking packages for {0}", assembly);
                 var packages = filenamePackagePairs.Where(f => f.Key == assembly).Select(p => p.Value);
@@ -67,6 +70,41 @@ namespace NuGet.Extensions.Repositories
                 else
                 {
                     _resolvedAssemblies[assembly].Add(packages.OrderByDescending(p => p.Version).FirstOrDefault());
+                }
+            }
+
+            return new AssemblyToPackageMapping(_console, _fileSystem, _resolvedAssemblies);
+        }
+
+        /// <summary>
+        /// Resolves a dictionary of packages that contain the assemblies requested.
+        /// </summary>
+        /// <param name="exhaustive">if set to <c>true</c> [exhaustive].</param>
+        /// <returns></returns>
+        public AssemblyToPackageMapping GetAssemblyToPackageMapping(Dictionary<IReference, string> assemblies, bool exhaustive)
+        {
+            _resolvedAssemblies = assemblies.ToDictionary(a => a.Key.DllName, _ => new List<IPackage>());
+
+            int max = _packageSource.Count();
+
+            _console.WriteLine("Searching through {0} packages", max);
+            foreach (var assembly in assemblies)
+            {
+                _console.WriteLine("Checking packages for {0}", assembly.Key.DllName);
+                var packages = _packageSource.Where(p => p.Id == assembly.Value && assembly.Key.GetSafeVersion().Satisfies(p.Version));
+
+                if (packages.IsEmpty())
+                {
+                    continue;
+                }
+
+                if (exhaustive)
+                {
+                    _resolvedAssemblies[assembly.Key.DllName].AddRange(packages);
+                }
+                else
+                {
+                    _resolvedAssemblies[assembly.Key.DllName].Add(packages.OrderByDescending(p => p.Version).FirstOrDefault());
                 }
             }
 

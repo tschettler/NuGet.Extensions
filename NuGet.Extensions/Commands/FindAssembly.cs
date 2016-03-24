@@ -56,9 +56,9 @@ namespace NuGet.Extensions.Commands
             sw.Start();
             var repository = GetRepository();
             var packageSource = GetPackageList(repository);
-            _resolver = new RepositoryAssemblyResolver(assemblies, packageSource, _fileSystem, Console);
+            _resolver = new RepositoryAssemblyResolver(packageSource, _fileSystem, Console);
 
-            var assemblyToPackageMapping = _resolver.GetAssemblyToPackageMapping(Exhaustive);
+            var assemblyToPackageMapping = _resolver.GetAssemblyToPackageMapping(assemblies, Exhaustive);
 
             Console.WriteLine();
             sw.Stop();

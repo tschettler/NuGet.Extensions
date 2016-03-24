@@ -1,0 +1,17 @@
+To install the package, run Install.ps1
+
+If you need to build the package after making changes, run Build.ps1
+
+If you receive this error:
+script1.ps1 cannot be loaded because running scripts is disabled on this system. For more information, see about_Execution_Policies at http://go.microsoft.com/fwlink/?LinkID=135170
+
+Run powershell as administrator and execute the following command:
+set-executionpolicy remotesigned
+
+http://www.faqforge.com/windows/windows-powershell-running-scripts-is-disabled-on-this-system/
+
+Helpful NuGet commands:
+nugetify - convert project references to nuget package references
+spec - create a nuspec file for the project
+update packages.config - updates the packages for the project
+pack - create a nuget package (pack -Prop Configuration=Release -IncludeReferencedProjects)

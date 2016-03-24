@@ -15,8 +15,8 @@ using NuGet.Extensions.ReferenceAnalysers;
 
 namespace NuGet.Extensions.Commands
 {
-    [Command("nugetify", "Given a solution, attempts to replace all file references with package references, adding all required" +
-                         " packages.config files as it goes.", MinArgs = 1, MaxArgs = 1)]
+    [Command("nugetify", "Given a solution, csproj, or directory, attempts to replace all file references with package references, adding all required" +
+                         " packages.config files as it goes.", MaxArgs = 1)]
     public class Nugetify : Command, INuspecDataSource
     {
         private readonly List<string> _sources = new List<string>();
@@ -76,10 +76,10 @@ namespace NuGet.Extensions.Commands
 
         public override void ExecuteCommand()
         {
-             var path = this.Arguments[0];
-           if (string.IsNullOrEmpty(path))
+            var path = this.Arguments.FirstOrDefault();
+            if (string.IsNullOrEmpty(path))
             {
-                return;
+                path = Directory.GetCurrentDirectory();
             }
 
             // if it's a directory, have to find sln or csproj file
@@ -98,7 +98,7 @@ namespace NuGet.Extensions.Commands
             }
             else if (!File.Exists(path))
             {
-                this.Console.WriteError("Could not find file : {0}", path);   
+                this.Console.WriteError("Could not find file : {0}", path);
                 return;
             }
 
@@ -120,9 +120,9 @@ namespace NuGet.Extensions.Commands
 
             var repository = this.GetRepository();
 
-            RemoveNugetProjectsFromSln(solutionFile.FullName, repository);
+            this.RemoveNugetProjectsFromSln(solutionFile.FullName, repository);
 
-            using (var solutionAdapter = new CachingSolutionLoader(solutionFile, GetMsBuildProperties(solutionFile), Console))
+            using (var solutionAdapter = new CachingSolutionLoader(solutionFile, this.GetMsBuildProperties(solutionFile), this.Console))
             {
                 this.ProcessProjects(solutionFile, solutionAdapter.GetProjects(), repository);
             }
@@ -132,46 +132,107 @@ namespace NuGet.Extensions.Commands
 
         private void NugetifyProject(FileInfo solutionFile)
         {
-            var projectLoader = new CachingProjectLoader(new Dictionary<string, string>(), Console);
-            var project = new Project(solutionFile.FullName);
+            using (var projectLoader = new CachingProjectLoader(new Dictionary<string, string>(), this.Console))
+            {
+                var project = new Project(solutionFile.FullName);
 
-            var projectAdapter = new ProjectAdapter(project, projectLoader);
+                var projectAdapter = new ProjectAdapter(project, projectLoader);
 
-            var repository = this.GetRepository();
+                var repository = this.GetRepository();
 
-            this.ProcessProjects(solutionFile, new List<IVsProject> { projectAdapter }, repository);
+                this.ProcessProjects(solutionFile, new List<IVsProject> { projectAdapter }, repository);
+            }
 
-            Console.WriteLine("Complete!");            
+            Console.WriteLine("Complete!");
         }
 
         private AggregateRepository GetRepository()
         {
-            var repository = AggregateRepositoryHelper.CreateAggregateRepositoryFromSources(RepositoryFactory, SourceProvider, Source);
-            repository.Logger = Console;
+            var repository = AggregateRepositoryHelper.CreateAggregateRepositoryFromSources(RepositoryFactory, SourceProvider, this.Source);
+            repository.Logger = this.Console;
             return repository;
         }
 
         private void ProcessProjects(FileInfo solutionFile, List<IVsProject> projectAdapters, AggregateRepository repository)
         {
-            var existingSolutionPackagesRepo = new SharedPackageRepository(Path.Combine(solutionFile.Directory.FullName, "packages"));
-
+            var existingSolutionPackagesRepo = this.GetPackageRepository(solutionFile.Directory.FullName);
+            
             Console.WriteLine("Processing {0} projects...", projectAdapters.Count);
+
+            var primaryPackages = new List<string>();
 
             foreach (var projectAdapter in projectAdapters)
             {
-                // skip projects that already have a NuGet version, we will remove these later
-                if (repository.FindPackagesById(projectAdapter.ProjectName).Any())
-                {
-                    continue;
-                }
-
                 Console.WriteLine();
                 Console.WriteLine("Processing project: {0}", projectAdapter.ProjectName);
 
-                NugetifyProject(projectAdapter, solutionFile.Directory, existingSolutionPackagesRepo, repository);
+                var newpackages = this.NugetifyProject(projectAdapter, solutionFile.Directory, existingSolutionPackagesRepo, repository);
+                var primaryPackagesForProject = this.GetPrimaryPackages(newpackages);
+                primaryPackages.AddRange(primaryPackagesForProject);
 
                 Console.WriteLine("Project completed!");
-            }           
+            }
+
+            Console.WriteLine();
+
+            Console.WriteLine(ConsoleColor.DarkGreen, "Package reinstall commands:");
+
+            // todo: update this to a more succinct list based on dependencies
+            //var dependencies = packagesAdded.SelectMany(p => p.DependencySets).SelectMany(d => d.Dependencies).Select(d => d.Id);
+            //var uniquePackageIds = packagesAdded.Select(p => p.Id).Distinct().Where(id => !dependencies.Contains(id));
+
+            //var uniquePackageIds = packagesAdded.Where(p => p.DependencySets.Any()).Select(p => p.Id).Distinct();
+
+            foreach (var package in primaryPackages.Distinct())
+            {
+                Console.WriteLine("update-package {0} -Reinstall", package);
+            }
+
+            Console.WriteLine();
+        }
+
+        /// <summary>
+        /// Gets only packages that are not dependencies of other packages
+        /// </summary>
+        /// <param name="packages">
+        /// The packages.
+        /// </param>
+        /// <returns>
+        /// The <see cref="IEnumerable"/>.
+        /// </returns>
+        private IEnumerable<string> GetPrimaryPackages(ICollection<IPackage> packages)
+        {
+            var dependencies = packages.SelectMany(p => p.DependencySets).SelectMany(d => d.Dependencies).Select(d => d.Id);
+
+            return from package in packages where dependencies.All(d => d != package.Id) select package.Id;
+        }
+
+        private SharedPackageRepository GetPackageRepository(string slnPath)
+        {
+            // we remove the packages directory
+            var packagesPath = Path.Combine(slnPath, "packages");
+
+            var existingpath = this.GetClosestPath(Directory.GetParent(slnPath).FullName, "packages");
+
+            if (existingpath != null && Directory.Exists(packagesPath))
+            {
+                Directory.Delete(packagesPath, true);
+            }
+
+            return new SharedPackageRepository(existingpath ?? packagesPath);
+        }
+
+        public string GetClosestPath(string currentPath, string folderName)
+        {
+            var folderPath = Path.Combine(currentPath, folderName);
+            if (Directory.Exists(folderPath))
+            {
+                return folderPath;
+            }
+
+            var isRoot = Directory.GetDirectoryRoot(currentPath) == currentPath;
+
+            return isRoot ? null : this.GetClosestPath(Directory.GetParent(currentPath).FullName, folderName);
         }
 
         private void RemoveNugetProjectsFromSln(string slnPath, AggregateRepository repository)
@@ -187,7 +248,7 @@ namespace NuGet.Extensions.Commands
                 return;
             }
 
-            var regexFormat = @"^Project.*\""{0}\"".*$[\s\S]*^EndProject";
+            var regexFormat = @"^Project.*\""{0}\"".*$[\s\S]*?^EndProject";
 
             foreach (var project in projectsToRemove)
             {
@@ -199,43 +260,60 @@ namespace NuGet.Extensions.Commands
             Console.WriteLine("Removed {0} projects from the solution:{1}{2}", projectsToRemove.Count(), Environment.NewLine, string.Join(Environment.NewLine, projectsToRemove.Select(p => p.ProjectName)));
         }
 
-        private void NugetifyProject(IVsProject projectAdapter, DirectoryInfo solutionRoot, ISharedPackageRepository existingSolutionPackagesRepo, AggregateRepository repository)
+        private ICollection<IPackage> NugetifyProject(IVsProject projectAdapter, DirectoryInfo solutionRoot, ISharedPackageRepository existingSolutionPackagesRepo, AggregateRepository repository)
         {
-            var projectNugetifier = CreateProjectNugetifier(projectAdapter, repository);
+            var projectNugetifier = this.CreateProjectNugetifier(projectAdapter, repository);
             var packagesAdded = projectNugetifier.NugetifyReferences(solutionRoot);
             projectNugetifier.AddNugetReferenceMetadata(existingSolutionPackagesRepo, packagesAdded);
             projectAdapter.Save();
 
-            if (NuSpec)
+            if (!this.NuSpec)
             {
-                var manifestDependencies = projectNugetifier.GetManifestDependencies(packagesAdded);
-                var nuspecBuilder = new NuspecBuilder(projectAdapter.AssemblyName);
-                nuspecBuilder.SetMetadata(this, manifestDependencies);
-                nuspecBuilder.SetDependencies(manifestDependencies);
-                nuspecBuilder.Save(Console);
+                return packagesAdded;
             }
+
+            var manifestDependencies = projectNugetifier.GetManifestDependencies(packagesAdded);
+            var nuspecBuilder = new NuspecBuilder(projectAdapter.AssemblyName);
+            nuspecBuilder.SetMetadata(this, manifestDependencies);
+            nuspecBuilder.SetDependencies(manifestDependencies);
+            nuspecBuilder.Save(this.Console);
+            return packagesAdded;
         }
 
         private ProjectNugetifier CreateProjectNugetifier(IVsProject projectAdapter, AggregateRepository repository)
         {
             var projectFileSystem = new PhysicalFileSystem(projectAdapter.ProjectDirectory.ToString());
-            var hintPathGenerator = new HintPathGenerator();
+            var hintPathGenerator = new HintPathGenerator()
+                                        {
+                                            PackagesDirectory =
+                                                this.GetPackageRepository(projectFileSystem.Root)
+                                                .Source
+                                        };
+
             return new ProjectNugetifier(projectAdapter, repository, projectFileSystem, Console, hintPathGenerator);
         }
 
         private IDictionary<string, string> GetMsBuildProperties(FileInfo solutionFile)
         {
-            var buildProperties = GetParsedBuildProperties();
+            var buildProperties = this.GetParsedBuildProperties();
             buildProperties["SolutionDir"] = solutionFile.Directory.FullName;
             return buildProperties;
         }
 
         private IDictionary<string, string> GetParsedBuildProperties()
         {
-            if (MsBuildProperties == null) return new Dictionary<string, string>();
-            var keyValuePairs = MsBuildProperties.Split(',');
+            if (this.MsBuildProperties == null)
+            {
+                return new Dictionary<string, string>();
+            }
+
+            var keyValuePairs = this.MsBuildProperties.Split(',');
             var twoElementArrays = keyValuePairs.Select(kvp => kvp.Split('=')).ToList();
-            foreach (var errorKvp in twoElementArrays.Where(a => a.Length != 2)) throw new ArgumentException(string.Format("Key value pair near {0} is formatted incorrectly", string.Join(",", errorKvp[0])));
+            foreach (var errorKvp in twoElementArrays.Where(a => a.Length != 2))
+            {
+                throw new ArgumentException(string.Format("Key value pair near {0} is formatted incorrectly", string.Join(",", errorKvp[0])));
+            }
+
             return twoElementArrays.ToDictionary(kvp => kvp[0].Trim(), kvp => kvp[1].Trim());
         }
     }

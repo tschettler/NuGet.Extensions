@@ -54,9 +54,9 @@ namespace NuGet.Extensions
             return null;
         }
 
-        public IList<KeyValuePair<string, string>> GetValues(string section, bool isPath)
+        public IList<SettingValue> GetValues(string section, bool isPath)
         {
-            return new List<KeyValuePair<string, string>>();
+            return new List<SettingValue>();
         }
 
         /// <summary>
@@ -84,9 +84,9 @@ namespace NuGet.Extensions
         /// <param name="section"></param>
         /// <param name="key"></param>
         /// <returns></returns>
-        public IList<KeyValuePair<string, string>> GetNestedValues(string section, string key)
+        public IList<SettingValue> GetNestedValues(string section, string key)
         {
-            return new List<KeyValuePair<string, string>>();
+            return new List<SettingValue>();
         }
 
         /// <summary>

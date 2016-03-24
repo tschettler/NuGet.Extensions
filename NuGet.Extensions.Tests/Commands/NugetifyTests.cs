@@ -7,6 +7,9 @@ using NUnit.Framework;
 
 namespace NuGet.Extensions.Tests.Commands
 {
+    using System;
+    using System.Collections.Generic;
+
     public class NugetifyTests
     {
         private DirectoryInfo _solutionDir;
@@ -50,6 +53,23 @@ namespace NuGet.Extensions.Tests.Commands
             console.AssertConsoleHasErrors();
         }
 
+        [Test]
+        [Ignore]
+        public void TestWithProjectReferences()
+        {
+            var console = new ConsoleMock();
+
+            var sln = @"C:\Path\To\My\Solution";
+            var source = new DirectoryInfo(@"\\custom\repository\path");
+            var nugetify = GetNugetifyCommandWithRepositories(console, sln, source);
+            nugetify.Source.Add(source.FullName);
+            nugetify.Source.Add("https://www.nuget.org/api/v2/");
+            nugetify.ExecuteCommand();
+
+            console.AssertConsoleHasNoErrorsOrWarnings();
+        }
+
+
         private static Nugetify GetNugetifyCommand(ConsoleMock console, string solutionFile, DirectoryInfo packageSource)
         {
             var repositoryFactory = new Mock<IPackageRepositoryFactory>();
@@ -60,7 +80,33 @@ namespace NuGet.Extensions.Tests.Commands
                                MsBuildProperties = "Configuration=Releasable,SomeOtherParameter=false",
                                NuSpec = true,
                            };
-            nugetify.Arguments.AddRange(new[] {solutionFile, packageSource.FullName});
+            nugetify.Arguments.AddRange(new[] { solutionFile, packageSource.FullName });
+            return nugetify;
+        }
+
+        private static Nugetify GetNugetifyCommandWithRepositories(ConsoleMock console, string solutionFile, DirectoryInfo packageSource)
+        {
+            var repositoryFactory = new Mock<IPackageRepositoryFactory>();
+            repositoryFactory.Setup(f => f.CreateRepository(@"\\custom\repository\path")).Returns(new LocalPackageRepository(@"\\custom\repository\path"));
+            repositoryFactory.Setup(f => f.CreateRepository("https://www.nuget.org/api/v2/")).Returns(new DataServicePackageRepository(new Uri("https://www.nuget.org/api/v2/")));
+
+            var packageSourceProvider = new Mock<IPackageSourceProvider>();
+            packageSourceProvider.Setup(p => p.LoadPackageSources())
+                .Returns(new List<PackageSource>()
+                             {
+                                 new PackageSource(@"\\custom\repository\path", "My NuGet Packages", true),
+                                 new PackageSource("https://www.nuget.org/api/v2/", "nuget.org", true)
+                             });
+
+            packageSourceProvider.Setup(p => p.IsPackageSourceEnabled(It.Is<PackageSource>(s => s.IsEnabled))).Returns(true);
+
+            var nugetify = new NugetifyCommandRunner(repositoryFactory.Object, packageSourceProvider.Object)
+            {
+                Console = console.Object,
+                MsBuildProperties = "Configuration=Releasable,SomeOtherParameter=false",
+                NuSpec = true,
+            };
+            nugetify.Arguments.AddRange(new[] { solutionFile, packageSource.FullName });
             return nugetify;
         }
     }

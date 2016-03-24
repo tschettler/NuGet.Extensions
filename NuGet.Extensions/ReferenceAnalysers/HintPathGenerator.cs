@@ -10,12 +10,15 @@ namespace NuGet.Extensions.ReferenceAnalysers
         public HintPathGenerator()
         {}
 
+        public string PackagesDirectory { get; set; }
+
         public string ForAssembly(DirectoryInfo solutionDir, DirectoryInfo projectDir, IPackage package, string assemblyFilename)
         {
             var fileLocation = GetFileLocationFromPackage(package, assemblyFilename);
             //TODO make version available, currently only works for non versioned package directories...
             var packageIdentifier = string.Format("{0}.{1}", package.Id, package.Version);
-            var newHintPathFull = Path.Combine(projectDir.FullName, "packages", packageIdentifier, fileLocation);
+            var packagesDir = this.PackagesDirectory ?? Path.Combine(projectDir.FullName, "packages");
+            var newHintPathFull = Path.Combine(packagesDir, packageIdentifier, fileLocation);
             var newHintPathRelative = GetRelativePath(projectDir.FullName + Path.DirectorySeparatorChar, newHintPathFull);
             return newHintPathRelative;
         }

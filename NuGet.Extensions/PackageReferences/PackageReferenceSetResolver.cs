@@ -23,7 +23,7 @@ namespace NuGet.Extensions.PackageReferences
             var cleanVersions = new List<PackageReference>();
             var failed = new List<PackageReference>();
             var fullyResolved = new List<PackageReference>();
-
+            
             //Need to split into two lists
             //1. PackageReference for Id with only a version
             //2. PackageReference for Id with an additional allowedVersion
